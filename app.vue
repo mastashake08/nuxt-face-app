@@ -52,8 +52,11 @@
 
     <!-- Canvas to display image or video with filters -->
     <div class="flex justify-center mb-8">
-      <canvas class="border-2 border-gray-400 shadow-lg" ref="canvas" :width="canvasWidth" :height="canvasHeight"></canvas>
+      <canvas class="border-2 border-gray-400 shadow-lg" ref="mainCanvas" :width="canvasWidth" :height="canvasHeight"></canvas>
     </div>
+
+    <!-- Hidden face canvas -->
+    <canvas ref="faceCanvas" :width="canvasWidth" :height="canvasHeight" style="display:none;"></canvas>
 
     <!-- Button to export video -->
     <div v-if="isVideo" class="mt-4 text-center">
@@ -68,7 +71,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
-const canvas = ref(null)
+const mainCanvas = ref(null)
+const faceCanvas = ref(null)
 const canvasWidth = ref(800)
 const canvasHeight = ref(600)
 const selectedFilterId = ref('') // Selected filter ID from the SVG
@@ -131,7 +135,7 @@ const loadImage = (file) => {
   img.onload = async () => {
     currentImage = img; // Store the current image in memory
 
-    const context = canvas.value.getContext('2d')
+    const context = mainCanvas.value.getContext('2d')
     context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
 
     // Detect faces if the FaceDetector API is available
@@ -149,32 +153,35 @@ const loadImage = (file) => {
 
 // Apply the filter and animate the image like a video
 const startImageAnimation = () => {
-  const context = canvas.value.getContext('2d')
+  const mainContext = mainCanvas.value.getContext('2d')
+  const faceContext = faceCanvas.value.getContext('2d')
 
   const animateImage = () => {
-    context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+    mainContext.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
 
-    // Check if faces are detected
-    if (faces.value.length > 0) {
-      // Draw the image without the filter first
-      context.drawImage(currentImage, 0, 0, canvasWidth.value, canvasHeight.value)
+    // Draw the image on the main canvas
+    mainContext.drawImage(currentImage, 0, 0, canvasWidth.value, canvasHeight.value)
 
-      // Apply the selected filter to the faces only
-      faces.value.forEach((face) => {
-        const { width, height, top, left, x, y } = face.boundingBox
-        //context.save()
-        context.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
-        context.drawImage(currentImage, x,y)
-       // context.restore()
-      })
-    } else {
-      // No faces detected, apply filter to the whole image
-      context.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
-      context.drawImage(currentImage, 0, 0, canvasWidth.value, canvasHeight.value)
-    }
+    // Apply the filter to the faces only on the face canvas
+    faces.value.forEach((face) => {
+      const { width, height, top, left, x, y } = face.boundingBox
+
+      // Clear face canvas before redrawing
+      faceContext.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+
+      // Draw the face region on the face canvas
+      faceContext.drawImage(currentImage, left, top, width, height, left, top, width, height)
+
+      // Apply the filter only on the face canvas
+      faceContext.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
+
+      // Grab face data from face canvas and put it back on the main canvas
+      const faceImageData = faceContext.getImageData(left, top, width, height)
+      mainContext.putImageData(faceImageData, x,y)
+    })
 
     // Draw faces and landmarks
-    drawFacesAndLandmarks(context)
+    drawFacesAndLandmarks(mainContext)
 
     animationFrameId = requestAnimationFrame(animateImage) // Loop the animation
   }
@@ -187,7 +194,7 @@ const startImageAnimation = () => {
 const drawFacesAndLandmarks = (context) => {
   faces.value.forEach((face) => {
     const { width, height, top, left } = face.boundingBox
-    //context.save()
+    context.save()
 
     // Draw face bounding box
     context.strokeStyle = 'red'
@@ -230,7 +237,7 @@ const onSvgUpload = (event) => {
 
 // Function to render video with the selected SVG filter
 const renderVideoWithFilter = () => {
-  const context = canvas.value.getContext('2d')
+  const context = mainCanvas.value.getContext('2d')
 
   const renderFrame = () => {
     context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
@@ -250,7 +257,7 @@ const renderVideoWithFilter = () => {
 
 // Export 5-second video with applied filter
 const exportVideo = () => {
-  const canvasElement = canvas.value
+  const canvasElement = mainCanvas.value
   const stream = canvasElement.captureStream(30) // Capture at 30fps
   const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
   const chunks = []
