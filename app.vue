@@ -11,7 +11,6 @@
         <li>Once the SVG is uploaded, select a filter from the dropdown list to apply to the image or video.</li>
         <li>For images, detected faces will be highlighted, and the filter will be applied only to the detected faces.</li>
         <li>For videos, the filter will be applied to the entire video in real time.</li>
-        <li>If you've uploaded a video, you can export the video with the applied filter by clicking the "Export 5s Video" button.</li>
       </ol>
     </div>
 
@@ -52,15 +51,16 @@
 
     <!-- Canvas to display image or video with filters -->
     <div class="flex justify-center mb-8">
-      <canvas class="border-2 border-gray-400 shadow-lg" ref="mainCanvas" :width="canvasWidth" :height="canvasHeight"></canvas>
+      <canvas class="border-2 border-gray-400 shadow-lg" ref="mainCanvas"></canvas>
     </div>
 
     <!-- Hidden face canvas -->
-    <canvas ref="faceCanvas" :width="canvasWidth" :height="canvasHeight" style="display:none;"></canvas>
+    <canvas ref="faceCanvas" style="display:none;"></canvas>
 
-    <!-- Button to export video -->
-    <div v-if="isVideo" class="mt-4 text-center">
-      <button @click="exportVideo" class="bg-green-500 text-white px-4 py-2 rounded-lg shadow-md hover:bg-green-400 transition duration-200">Export 5s Video</button>
+    <!-- Buttons for downloading and exporting -->
+    <div class="text-center space-y-4">
+      <button @click="downloadImage" class="bg-blue-500 text-white px-4 py-2 rounded-lg shadow-md hover:bg-blue-400 transition duration-200">Download Image</button>
+      <button v-if="isVideo" @click="exportVideo" class="bg-green-500 text-white px-4 py-2 rounded-lg shadow-md hover:bg-green-400 transition duration-200">Export Video</button>
     </div>
 
     <!-- Injected SVG container -->
@@ -85,6 +85,8 @@ let isVideo = ref(false); // Flag to check if the upload is a video
 const faces = ref([]); // Store detected faces
 const filterIds = ref([]); // Store filter IDs from the uploaded SVG
 let currentImage = null; // Store current image in memory for re-drawing
+let mediaRecorder = null; // Store MediaRecorder instance
+let recordedChunks = []; // Store video recording chunks
 
 let faceDetector = null; // To initialize the FaceDetector API
 
@@ -122,6 +124,13 @@ const loadVideo = (file) => {
 
   video.onloadeddata = () => {
     videoElement.value = video;
+    // Dynamically resize canvas to match video dimensions
+    canvasWidth.value = video.videoWidth
+    canvasHeight.value = video.videoHeight
+    mainCanvas.value.width = canvasWidth.value
+    mainCanvas.value.height = canvasHeight.value
+    faceCanvas.value.width = canvasWidth.value
+    faceCanvas.value.height = canvasHeight.value
     renderVideoWithFilter()
   }
 }
@@ -135,14 +144,20 @@ const loadImage = (file) => {
   img.onload = async () => {
     currentImage = img; // Store the current image in memory
 
+    // Dynamically resize canvas to match image dimensions
+    canvasWidth.value = img.width
+    canvasHeight.value = img.height
+    mainCanvas.value.width = canvasWidth.value
+    mainCanvas.value.height = canvasHeight.value
+    faceCanvas.value.width = canvasWidth.value
+    faceCanvas.value.height = canvasHeight.value
+
     const context = mainCanvas.value.getContext('2d')
     context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
 
     // Detect faces if the FaceDetector API is available
     if (faceDetector) {
       faces.value = await faceDetector.detect(img)
-
-      // Apply the filter to the image and start animation
       startImageAnimation()
     } else {
       console.warn('FaceDetector is not available.')
@@ -164,7 +179,7 @@ const startImageAnimation = () => {
 
     // Apply the filter to the faces only on the face canvas
     faces.value.forEach((face) => {
-      const { width, height, top, left, x, y } = face.boundingBox
+      const { width, height, top, left } = face.boundingBox
 
       // Clear face canvas before redrawing
       faceContext.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
@@ -177,7 +192,7 @@ const startImageAnimation = () => {
 
       // Grab face data from face canvas and put it back on the main canvas
       const faceImageData = faceContext.getImageData(left, top, width, height)
-      mainContext.putImageData(faceImageData, x,y)
+      mainContext.putImageData(faceImageData, left, top)
     })
 
     // Draw faces and landmarks
@@ -194,7 +209,6 @@ const startImageAnimation = () => {
 const drawFacesAndLandmarks = (context) => {
   faces.value.forEach((face) => {
     const { width, height, top, left } = face.boundingBox
-    context.save()
 
     // Draw face bounding box
     context.strokeStyle = 'red'
@@ -210,8 +224,6 @@ const drawFacesAndLandmarks = (context) => {
         context.fill()
       })
     }
-
-    context.restore()
   })
 }
 
@@ -255,21 +267,20 @@ const renderVideoWithFilter = () => {
   animationFrameId = requestAnimationFrame(renderFrame)
 }
 
-// Export 5-second video with applied filter
+// Export the full video length with applied filter
 const exportVideo = () => {
   const canvasElement = mainCanvas.value
   const stream = canvasElement.captureStream(30) // Capture at 30fps
-  const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
-  const chunks = []
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
 
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
-      chunks.push(event.data)
+      recordedChunks.push(event.data)
     }
   }
 
   mediaRecorder.onstop = () => {
-    const blob = new Blob(chunks, { type: 'video/webm' })
+    const blob = new Blob(recordedChunks, { type: 'video/webm' })
     const videoUrl = URL.createObjectURL(blob)
 
     // Create a download link
@@ -277,13 +288,26 @@ const exportVideo = () => {
     link.href = videoUrl
     link.download = 'filtered-video.webm'
     link.click()
+
+    // Clear recorded chunks after saving the video
+    recordedChunks = []
   }
 
-  // Record for 5 seconds
+  // Start recording the video
   mediaRecorder.start()
-  setTimeout(() => {
+
+  // Stop recording when the video ends
+  videoElement.value.onended = () => {
     mediaRecorder.stop()
-  }, 5000)
+  }
+}
+
+// Function to download the current canvas as an image
+const downloadImage = () => {
+  const link = document.createElement('a')
+  link.download = 'filtered-image.png'
+  link.href = mainCanvas.value.toDataURL('image/png')
+  link.click()
 }
 
 // Stop the animation when needed (e.g., when switching files)
