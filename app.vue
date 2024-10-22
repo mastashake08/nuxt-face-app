@@ -211,7 +211,7 @@ const drawFacesAndLandmarks = (context) => {
       })
     }
 
-    //context.restore()
+    context.restore()
   })
 }
 
