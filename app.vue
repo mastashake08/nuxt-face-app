@@ -32,21 +32,27 @@
       </select>
     </div>
 
-    <!-- Display the number of detected faces -->
-    <div v-if="faces.length > 0" class="text-center mb-4 text-xl font-semibold text-green-700">
-      {{ faces.length }} face(s) detected.
+    <!-- Filter options -->
+    <div class="flex justify-center space-x-4 mb-8">
+      <label class="inline-flex items-center">
+        <input type="checkbox" v-model="applyToFaces" />
+        <span class="ml-2">Apply to Faces</span>
+      </label>
+      <label class="inline-flex items-center">
+        <input type="checkbox" v-model="applyToBackground" />
+        <span class="ml-2">Apply to Background</span>
+      </label>
+      <label class="inline-flex items-center">
+        <input type="checkbox" v-model="applyToFullCanvas" />
+        <span class="ml-2">Apply to Full Canvas</span>
+      </label>
     </div>
 
-    <!-- Display the coordinates of detected faces and landmarks -->
-    <div v-if="faces.length > 0" class="text-center text-gray-700 mb-4">
-      <div v-for="(face, index) in faces" :key="index">
-        Face {{ index + 1 }}: ({{ Math.round(face.boundingBox.left) }}, {{ Math.round(face.boundingBox.top) }})
-        <ul class="mt-2">
-          <li v-for="(landmark, lIndex) in face.landmarks" :key="lIndex">
-            Landmark {{ lIndex + 1 }}: ({{ Math.round(landmark.locations[0].x) }}, {{ Math.round(landmark.locations[0].y) }})
-          </li>
-        </ul>
-      </div>
+    <!-- Toggle button for landmarks and bounding boxes -->
+    <div class="text-center mb-8">
+      <button @click="toggleFaceLandmarks" class="bg-gray-500 text-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-400 transition duration-200">
+        {{ showLandmarks ? 'Hide Landmarks/Bounding Box' : 'Show Landmarks/Bounding Box' }}
+      </button>
     </div>
 
     <!-- Canvas to display image or video with filters -->
@@ -73,8 +79,6 @@ import { ref, onMounted } from 'vue'
 
 const mainCanvas = ref(null)
 const faceCanvas = ref(null)
-const canvasWidth = ref(800)
-const canvasHeight = ref(600)
 const selectedFilterId = ref('') // Selected filter ID from the SVG
 const svgContainer = ref(null) // Hidden SVG container for uploaded SVG filters
 const videoElement = ref(null) // Video element for video playback
@@ -87,6 +91,10 @@ const filterIds = ref([]); // Store filter IDs from the uploaded SVG
 let currentImage = null; // Store current image in memory for re-drawing
 let mediaRecorder = null; // Store MediaRecorder instance
 let recordedChunks = []; // Store video recording chunks
+let showLandmarks = ref(true); // To toggle visibility of landmarks and bounding boxes
+let applyToFaces = ref(true); // Apply filter to faces
+let applyToBackground = ref(false); // Apply filter to background
+let applyToFullCanvas = ref(false); // Apply filter to full canvas
 
 let faceDetector = null; // To initialize the FaceDetector API
 
@@ -124,13 +132,7 @@ const loadVideo = (file) => {
 
   video.onloadeddata = () => {
     videoElement.value = video;
-    // Dynamically resize canvas to match video dimensions
-    canvasWidth.value = video.videoWidth
-    canvasHeight.value = video.videoHeight
-    mainCanvas.value.width = canvasWidth.value
-    mainCanvas.value.height = canvasHeight.value
-    faceCanvas.value.width = canvasWidth.value
-    faceCanvas.value.height = canvasHeight.value
+    resizeCanvas(video.videoWidth, video.videoHeight);
     renderVideoWithFilter()
   }
 }
@@ -144,16 +146,10 @@ const loadImage = (file) => {
   img.onload = async () => {
     currentImage = img; // Store the current image in memory
 
-    // Dynamically resize canvas to match image dimensions
-    canvasWidth.value = img.width
-    canvasHeight.value = img.height
-    mainCanvas.value.width = canvasWidth.value
-    mainCanvas.value.height = canvasHeight.value
-    faceCanvas.value.width = canvasWidth.value
-    faceCanvas.value.height = canvasHeight.value
+    resizeCanvas(img.width, img.height);
 
     const context = mainCanvas.value.getContext('2d')
-    context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+    context.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
 
     // Detect faces if the FaceDetector API is available
     if (faceDetector) {
@@ -161,9 +157,17 @@ const loadImage = (file) => {
       startImageAnimation()
     } else {
       console.warn('FaceDetector is not available.')
-      context.drawImage(img, 0, 0, canvasWidth.value, canvasHeight.value)
+      context.drawImage(img, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
     }
   }
+}
+
+// Resize the canvas based on the dimensions of the uploaded media
+const resizeCanvas = (width, height) => {
+  mainCanvas.value.width = width
+  mainCanvas.value.height = height
+  faceCanvas.value.width = width
+  faceCanvas.value.height = height
 }
 
 // Apply the filter and animate the image like a video
@@ -172,31 +176,48 @@ const startImageAnimation = () => {
   const faceContext = faceCanvas.value.getContext('2d')
 
   const animateImage = () => {
-    mainContext.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+    mainContext.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
 
-    // Draw the image on the main canvas
-    mainContext.drawImage(currentImage, 0, 0, canvasWidth.value, canvasHeight.value)
+    if (applyToFullCanvas.value) {
+      // Apply filter to the full canvas
+      mainContext.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
+      mainContext.drawImage(currentImage, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
+    } else {
+      // Draw the image without filter
+      mainContext.filter = 'none'
+      mainContext.drawImage(currentImage, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
 
-    // Apply the filter to the faces only on the face canvas
-    faces.value.forEach((face) => {
-      const { width, height, top, left } = face.boundingBox
+      // Apply filter to the faces only
+      if (applyToFaces.value) {
+        faces.value.forEach((face) => {
+          const { width, height, top, left } = face.boundingBox
 
-      // Clear face canvas before redrawing
-      faceContext.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+          // Clear face canvas before redrawing
+          faceContext.clearRect(0, 0, faceCanvas.value.width, faceCanvas.value.height)
 
-      // Draw the face region on the face canvas
-      faceContext.drawImage(currentImage, left, top, width, height, left, top, width, height)
+          // Draw the face region on the face canvas
+          faceContext.drawImage(currentImage, left, top, width, height, left, top, width, height)
 
-      // Apply the filter only on the face canvas
-      faceContext.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
+          // Apply the filter only on the face canvas
+          faceContext.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
 
-      // Grab face data from face canvas and put it back on the main canvas
-      const faceImageData = faceContext.getImageData(left, top, width, height)
-      mainContext.putImageData(faceImageData, left, top)
-    })
+          // Grab face data from face canvas and put it back on the main canvas
+          const faceImageData = faceContext.getImageData(left, top, width, height)
+          mainContext.putImageData(faceImageData, left, top)
+        })
+      }
 
-    // Draw faces and landmarks
-    drawFacesAndLandmarks(mainContext)
+      // Apply filter to the background if selected
+      if (applyToBackground.value) {
+        mainContext.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
+        mainContext.drawImage(currentImage, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
+      }
+    }
+
+    // Draw faces and landmarks if enabled
+    if (showLandmarks.value) {
+      drawFacesAndLandmarks(mainContext)
+    }
 
     animationFrameId = requestAnimationFrame(animateImage) // Loop the animation
   }
@@ -252,12 +273,12 @@ const renderVideoWithFilter = () => {
   const context = mainCanvas.value.getContext('2d')
 
   const renderFrame = () => {
-    context.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+    context.clearRect(0, 0, mainCanvas.value.width, mainCanvas.value.height)
 
     if (videoElement.value) {
       // Apply the selected SVG filter to the video
       context.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
-      context.drawImage(videoElement.value, 0, 0, canvasWidth.value, canvasHeight.value)
+      context.drawImage(videoElement.value, 0, 0, mainCanvas.value.width, mainCanvas.value.height)
     }
 
     animationFrameId = requestAnimationFrame(renderFrame) // Keep rendering frames
@@ -265,6 +286,11 @@ const renderVideoWithFilter = () => {
 
   // Start the animation loop for the video playback
   animationFrameId = requestAnimationFrame(renderFrame)
+}
+
+// Toggle the visibility of face landmarks and bounding boxes
+const toggleFaceLandmarks = () => {
+  showLandmarks.value = !showLandmarks.value
 }
 
 // Export the full video length with applied filter
