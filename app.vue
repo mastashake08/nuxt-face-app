@@ -158,17 +158,14 @@ const startImageAnimation = () => {
     if (faces.value.length > 0) {
       // Draw the image without the filter first
       context.drawImage(currentImage, 0, 0, canvasWidth.value, canvasHeight.value)
-      //context.save()
+
       // Apply the selected filter to the faces only
       faces.value.forEach((face) => {
-        const { width, height, top, left } = face.boundingBox
-        //context.restore()
-        const data = context.getImageData(left,top,width,height)
-        
+        const { width, height, top, left, x, y } = face.boundingBox
+        //context.save()
         context.filter = selectedFilterId.value ? `url(${selectedFilterId.value})` : 'none'
-        context.putImageData(data, left, top)
-        //context.restore()
-        context.filter = 'none'
+        context.drawImage(currentImage, x,y)
+       // context.restore()
       })
     } else {
       // No faces detected, apply filter to the whole image
@@ -207,7 +204,7 @@ const drawFacesAndLandmarks = (context) => {
       })
     }
 
-   // context.restore()
+    //context.restore()
   })
 }
 
