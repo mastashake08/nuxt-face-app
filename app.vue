@@ -132,7 +132,7 @@ const loadVideo = (file) => {
 
   video.onloadeddata = () => {
     videoElement.value = video;
-    resizeCanvas(video.videoWidth, video.videoHeight);
+    resizeCanvas(1024, 1024);
     renderVideoWithFilter()
   }
 }
